@@ -1,15 +1,9 @@
-(ns contrib.do
+(ns hyperfiddle.via
   (:require
-    [clojure.core.async :as async]
-    [cats.monad.either :as either]
-    [promesa.core :as p]
-    [contrib.promise :as promise]
-    [contrib.try$ :refer [try*]]
-    ;[promesa.async]
-    [meander.epsilon :as m :refer [rewrite]]
-    [meander.strategy.epsilon :as r])
-  #?(:cljs (:require-macros [contrib.do :refer [do-async]]
-                            [contrib.try$ :refer [try*]])))
+    [meander.epsilon :as m :refer [match]]
+    [meander.strategy.epsilon :as r]
+    [minitest :refer [tests]]))
+
 
 (defn tag-type
   "Extract the type from an action. Action is any keyword that starts with an uppercase letter.
@@ -25,7 +19,7 @@
 
 (defn typed-action? [val]
   (and (vector? val)
-       (typed-tag? (first val))))
+    (typed-tag? (first val))))
 
 (defn action-tag [val]
   (assert (vector? val))
@@ -34,39 +28,6 @@
 (defn action-type [val]
   (assert typed-action? val)
   (tag-type (action-tag val)))
-
-(defn as-either [v]
-  (if (either/either? v) v (either/right v)))
-
-(defmacro do-result
-  "Try to evaluate `body` and return an Either instead of throwing an exception."
-  [& body]
-  `(as-either (try* ~@body
-                   (catch :default e# (either/left e#)))))
-
-(defmacro from-result
-  "Map an either into an exception (thrown) or a value"
-  [& body]
-  `(either/branch (do-result ~@body)
-     (fn [e#] (throw e#))
-     identity))
-
-(defn as-p [v]
-  (p/then v identity))
-
-(defmacro do-async [& body]
-  `(as-p (try* (p/resolved ~@body)
-              (catch :default e# (p/rejected e#)))))
-
-(defn from-async [v]
-  (.join (do-async v)))
-
-(defmacro do-async-as-chan [& body]
-  `(let [c# (async/chan)]
-     (promise/branch (do-async ~@body)
-       #(async/put! c# %)
-       #(async/put! c# %))
-     c#))
 
 ; ----------------------------
 
@@ -154,7 +115,7 @@
 (defmacro do> [body]
   (rewrite-do body))
 
-(comment
+(tests
 
   (macroexpand-1 '(do> (+ a 1)))
   => '(+ a 1)
@@ -204,11 +165,7 @@
                 b ~(+ a ~(just 42))
                 c 1]
             ...)))
-  =>
-  (bind (just 1) (clojure.core/fn [a]
-  (bind (fapply (pure +) (pure a) (just 42)) (clojure.core/fn [b]
-  (bind (pure 1) (clojure.core/fn [c]
-    (do ...)))))))
+  => '(mlet [a (just 1) b (fapply (pure +) (pure a) (just 42)) c (pure 1)] ...)
 
   )
 
@@ -236,12 +193,28 @@
 
 (def rewrite-free (r/until = (r/top-down (r/attempt rewrite-free-sexp))))
 
-(comment
+(tests
   (rewrite-free '(mlet [a mv] ...))
-  => (contrib.do/! :Do.bind mv (clojure.core/fn [a] ...))
+  => '(hyperfiddle.via/! :Do.bind mv (clojure.core/fn [a] ...))
 
   (rewrite-free '(mlet [f (just +)] ...))
-  => (contrib.do/! :Do.bind (just +) (clojure.core/fn [f] ...))
+  => '(hyperfiddle.via/! :Do.bind (just +) (clojure.core/fn [f] ...))
+
+  (rewrite-free '(mlet [a (just 1) b (fapply (pure +) (pure a) (just 42)) c (pure 1)] ...))
+  ;=> '(bind (just 1) (clojure.core/fn [a]
+  ;                     (bind (fapply (pure +) (pure a) (just 42)) (clojure.core/fn [b]
+  ;                                                                  (bind (pure 1) (clojure.core/fn [c]
+  ;                                                                                   (do ...)))))))
+  => '(hyperfiddle.via/!
+        :Do.bind
+        (just 1)
+        (clojure.core/fn
+          [a]
+          (hyperfiddle.via/!
+            :Do.bind
+            (hyperfiddle.via/! :Do.fapply (hyperfiddle.via/! :Do.pure +) (hyperfiddle.via/! :Do.pure a) (just 42))
+            (clojure.core/fn [b] (hyperfiddle.via/! :Do.bind (hyperfiddle.via/! :Do.pure 1) (clojure.core/fn [c] ...))))))
+
   )
 
 ; ---
@@ -262,10 +235,10 @@
      (let [n# (count *stack)
            resolvers#                                       ; methods for an action-type (no inheritance, )
            (->> fns#
-                (group-by (comp tag-type key))              ; Override resolver methods as a single unit (no inheritance, via* must provide complete impl). GT said this is an optimization?
-                (reduce-kv (fn [m# action-type# methods#]
-                             (assoc m# action-type# (into {::nth n#} methods#))) ; ?
-                  {}))]
+             (group-by (comp tag-type key))              ; Override resolver methods as a single unit (no inheritance, via* must provide complete impl). GT said this is an optimization?
+             (reduce-kv (fn [m# action-type# methods#]
+                          (assoc m# action-type# (into {::nth n#} methods#))) ; ?
+               {}))]
 
        (binding [*stack (conj *stack R#)                    ; save the state pointer
                  *resolve (merge *resolve resolvers#)]      ; other action types are still available in dynamic scope
@@ -290,28 +263,25 @@
 
 (defn get-state []
   (or *this
-      (last *stack)))                                       ; ?
+    (last *stack)))                                       ; ?
 
-(comment
+(tests
 
   ;(macroexpand-1 '(mlet [a ma b mb] ...))
   ;=> (bind ma (fn [a] (bind mb (fn [b] ...))))
 
-  (macroexpand-1 '(via* (reify)                             ; !
-                    (for [f (pure +)
-                          a (pure 1)
-                          b ~(~f 10 ~a)]
-                      (pure (inc b)))))
-
-  (macroexpand-1 '(via* (reify)                             ; !
-                    (for [f (pure +)
-                          a (pure 1)
-                          b ~(~f 10 ~a)]
-                      (pure (inc b)))))
-  => "doesn't crash"
+  (try
+    (macroexpand-1 '(via* (reify)                           ; !
+                      (for [f (pure +)
+                            a (pure 1)
+                            b ~(~f 10 ~a)]
+                        (pure (inc b)))))
+    ::worked
+    (catch Exception e e))
+  => ::worked
   )
 
-(comment
+(tests
   (defn just [v] {:Maybe/just v})                           ; none is nil
 
   (deftype Maybe []
@@ -331,18 +301,17 @@
        :Do.bind   (fn [[_ {v :Maybe/just} mf]]
                     (if v (mf v)))}))
 
-  (comment
-    (via* (->Maybe)
-      (for [f (just +)
-            a (just 1)
-            b ~(~f 10 ~a)]
-        (pure (inc b))))
-    => #:Maybe{:just 12}
+  (via* (->Maybe)
+    (for [f (just +)
+          a (just 1)
+          b ~(~f 10 ~a)]
+      (pure (inc b))))
+  => #:Maybe{:just 12}
 
-    (via* (->Maybe)
-      (for [a ~(just 1)
-            b ~(+ a ~(just 42))
-            c (for [i (range (+ a 2))] i)]                  ; vanilla for
-        (pure (+ a b (reduce + c)))))
-    => #:Maybe{:just 47}
-    ))
+  (via* (->Maybe)
+    (for [a ~(just 1)
+          b ~(+ a ~(just 42))
+          c (for [i (range (+ a 2))] i)]                    ; vanilla for
+      (pure (+ a b (reduce + c)))))
+  => #:Maybe{:just 47}
+  )
