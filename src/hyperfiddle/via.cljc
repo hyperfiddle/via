@@ -282,24 +282,26 @@
   )
 
 (tests
-  (defn just [v] {:Maybe/just v})                           ; none is nil
+  (do
+    (defn just [v] {:Maybe/just v})                         ; none is nil
 
-  (deftype Maybe []
-    Do-via
-    (resolver-for [R]
-      {:Do.fmap   (fn [[_ f mv]]
-                    (match mv
-                      {:Maybe/just ?v} (f ?v)
-                      _ nil))
-       :Do.pure   (fn [[_ v]] {:Maybe/just v})
-       :Do.fapply (fn [[_ & avs]]
-                    (let [vs (map :Maybe/just avs)]
-                      (if (every? identity vs)
-                        (let [[f & args] vs]
-                          (just (apply f args)))
-                        nil)))
-       :Do.bind   (fn [[_ {v :Maybe/just} mf]]
-                    (if v (mf v)))}))
+    (deftype Maybe []
+      Do-via
+      (resolver-for [R]
+        {:Do.fmap   (fn [[_ f mv]]
+                      (match mv
+                        {:Maybe/just ?v} (f ?v)
+                        _ nil))
+         :Do.pure   (fn [[_ v]] {:Maybe/just v})
+         :Do.fapply (fn [[_ & avs]]
+                      (let [vs (map :Maybe/just avs)]
+                        (if (every? identity vs)
+                          (let [[f & args] vs]
+                            (just (apply f args)))
+                          nil)))
+         :Do.bind   (fn [[_ {v :Maybe/just} mf]]
+                      (if v (mf v)))})))
+  => nil
 
   (via* (->Maybe)
     (for [f (just +)
