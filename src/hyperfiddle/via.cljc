@@ -18,11 +18,11 @@
   (not (nil? (tag-type tag))))
 
 (defn typed-action? [val]
-  (and (vector? val)
+  (and #_(vector? val)
     (typed-tag? (first val))))
 
 (defn action-tag [val]
-  (assert (vector? val))
+  #_(assert (vector? val))
   (first val))
 
 (defn action-type [val]
@@ -247,19 +247,16 @@
          ))))
 
 (defn ! "call methods on object from stack variable"
-  [& action]
+  [& [F & args :as action]]
   ;{:pre [(doto action println)]}
-  (let [action (vec action)]
+  (assert (typed-action? action))
 
-    (assert (typed-action? action))
-
-    (let [R (get *resolve (action-type action))]
-      (binding [*this (nth *stack (::nth R))]               ; for backtracking state, let these unwind
-
-        (as-> ((get R (action-tag action)) action) result   ; for state monad, computation can continue forward by going deeper into this frame with re-entrant !
-          (do (set! *stack (assoc *stack (::nth R) *this))  ; *this may be mutated by actions
-              result))
-        ))))
+  (let [R (get *resolve (action-type action))]
+    (binding [*this (nth *stack (::nth R))]                 ; state monad
+      (let [f (get R F)                                     ; resolve handler
+            result (apply f args)]                          ; Re-entrant ! works
+        (set! *stack (assoc *stack (::nth R) *this))        ; Carry state forward
+        result))))
 
 (defn get-state []
   (or *this
@@ -288,20 +285,20 @@
     (deftype Maybe []
       Do-via
       (resolver-for [R]
-        {:Do.fmap   (fn [[_ f mv]]
+        {:Do.fmap   (fn [f mv]
                       (match mv
                         {:Maybe/just ?v} (f ?v)
                         _ nil))
-         :Do.pure   (fn [[_ v]] {:Maybe/just v})
-         :Do.fapply (fn [[_ & avs]]
+         :Do.pure   (fn [v] {:Maybe/just v})
+         :Do.fapply (fn [& avs]
                       (let [vs (map :Maybe/just avs)]
                         (if (every? identity vs)
                           (let [[f & args] vs]
                             (just (apply f args)))
                           nil)))
-         :Do.bind   (fn [[_ {v :Maybe/just} mf]]
+         :Do.bind   (fn [{v :Maybe/just} mf]
                       (if v (mf v)))})))
-  => nil
+  => hyperfiddle.via.Maybe
 
   (via* (->Maybe)
     (for [f (just +)
