@@ -117,6 +117,11 @@
 
 (tests
 
+  (rewrite-await '(a ~b)) => '(fmap a b)
+  (rewrite-await '(a ~b ~c)) => '(fapply (pure a) b c)
+  (rewrite-await '[a ~b]) => '(fapply (pure a) b c)
+  (rewrite-await '[a ~b ~c]) => '(fapply (pure a) b c)
+
   (macroexpand-1 '(do> (+ a 1)))
   => '(+ a 1)
 
@@ -226,7 +231,7 @@
 (def ^:dynamic *resolve {})                                 ; methods available in this dynamic scope
 (def ^:dynamic *this)                                       ; points to the active state record in a ! frame
 
-(defmacro via* [R & body]
+(defmacro via [R & body]
   `(let [R# ~R                                              ; R is the user defined state instance, e.g. a defrecord
          fns# (resolver-for R#)]                            ; This is a protocol to allow for user defined state type
 
@@ -268,7 +273,7 @@
   ;=> (bind ma (fn [a] (bind mb (fn [b] ...))))
 
   (try
-    (macroexpand-1 '(via* (reify)                           ; !
+    (macroexpand-1 '(via (reify)                           ; !
                       (for [f (pure +)
                             a (pure 1)
                             b ~(~f 10 ~a)]
@@ -282,32 +287,28 @@
   (do
     (defn just [v] {:Maybe/just v})                         ; none is nil
 
+    ; https://twitter.com/dustingetz/status/1305190850784309249
+    ; https://twitter.com/dustingetz/status/1312762707842564104
     (deftype Maybe []
       Do-via
       (resolver-for [R]
-        {:Do.fmap   (fn [f mv]
-                      (match mv
-                        {:Maybe/just ?v} (f ?v)
-                        _ nil))
-         :Do.pure   (fn [v] {:Maybe/just v})
-         :Do.fapply (fn [& avs]
-                      (let [vs (map :Maybe/just avs)]
+        {:Do.pure   (fn [v] {:Maybe/just v})
+         :Do.fmap   (fn [f & fvs]
+                      (let [vs (map :Maybe/just fvs)]
                         (if (every? identity vs)
-                          (let [[f & args] vs]
-                            (just (apply f args)))
-                          nil)))
-         :Do.bind   (fn [{v :Maybe/just} mf]
-                      (if v (mf v)))})))
+                          (just (apply f vs)))))
+         :Do.fapply (fn [& avs] (apply ! :Do.fmap #(apply % %&) avs))
+         :Do.bind   (fn [{v :Maybe/just} cont] (if v (cont v)))})))
   => hyperfiddle.via.Maybe
 
-  (via* (->Maybe)
+  (via (->Maybe)
     (for [f (just +)
           a (just 1)
           b ~(~f 10 ~a)]
       (pure (inc b))))
   => #:Maybe{:just 12}
 
-  (via* (->Maybe)
+  (via (->Maybe)
     (for [a ~(just 1)
           b ~(+ a ~(just 42))
           c (for [i (range (+ a 2))] i)]                    ; vanilla for
