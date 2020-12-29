@@ -119,7 +119,7 @@
 
   (rewrite-await '(a ~b)) => '(fmap a b)
   (rewrite-await '(a ~b ~c)) => '(fapply (pure a) b c)
-  (rewrite-await '[a ~b]) => '(fapply (pure a) b c)
+  (rewrite-await '[a ~b]) => '(fapply (pure a) b)
   (rewrite-await '[a ~b ~c]) => '(fapply (pure a) b c)
 
   (macroexpand-1 '(do> (+ a 1)))
@@ -302,8 +302,8 @@
   => hyperfiddle.via.Maybe
 
   (via (->Maybe)
-    (for [f (just +)
-          a (just 1)
+    (for [f (pure +)
+          a (pure 1)
           b ~(~f 10 ~a)]
       (pure (inc b))))
   => #:Maybe{:just 12}
