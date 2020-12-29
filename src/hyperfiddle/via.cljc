@@ -231,7 +231,7 @@
 (def ^:dynamic *resolve {})                                 ; methods available in this dynamic scope
 (def ^:dynamic *this)                                       ; points to the active state record in a ! frame
 
-(defmacro via [R & body]
+(defmacro frame [R & body]
   `(let [R# ~R                                              ; R is the user defined state instance, e.g. a defrecord
          fns# (resolver-for R#)]                            ; This is a protocol to allow for user defined state type
 
@@ -247,9 +247,12 @@
 
        (binding [*stack (conj *stack R#)                    ; save the state pointer
                  *resolve (merge *resolve resolvers#)]      ; other action types are still available in dynamic scope
+         ~@body))))
 
-         ~@(map (comp rewrite-free rewrite-do) body)
-         ))))
+(defmacro via [R & body]
+  `(frame
+     ~R
+     ~@(map (comp rewrite-free rewrite-do) body)))
 
 (defn ! "call methods on object from stack variable"
   [& [F & args :as action]]
@@ -281,6 +284,15 @@
     ::worked
     (catch Exception e e))
   := ::worked
+
+  (macroexpand-1 '(via (reify) 1)) := '(hyperfiddle.via/frame (reify) 1)
+  (eval (macroexpand-1
+          '(via (->Maybe)
+             (for [f (just +)
+                   a (just 1)
+                   b ~(~f 10 ~a)]
+               (pure (inc b))))))
+  := {:Maybe/just 12}
   )
 
 (tests
