@@ -52,15 +52,15 @@
           b ~(+ a ~(pure 42))
           c 1]
       (pure (+ a b c))))
-  => #:Maybe{:just 45}
+  := #:Maybe{:just 45}
 
   ; This has applications in using event-streams for UI programming in an ergonomic way
   ; (no r/atoms, UI is an expression)
 
   ; This approach is term rewriting
-  (do> (~f ~a b ...)) => (fapply f a (pure b))              ; applicative await
-  (do> (for [a ~(f ...) ...])) => (mlet [a (f ...)] ...)    ; monad await (flattened notation, later callbackified)
-  (do> (x ~(y ~z)) => ((comp x y) ~z) => (fmap (comp x y) z)) ; optimize based on laws (todo)
+  (do> (~f ~a b ...)) := (fapply f a (pure b))              ; applicative await
+  (do> (for [a ~(f ...) ...])) := (mlet [a (f ...)] ...)    ; monad await (flattened notation, later callbackified)
+  (do> (x ~(y ~z)) := ((comp x y) ~z) := (fmap (comp x y) z)) ; optimize based on laws (todo)
   )
 
 ;(declare mlet pure fmap fapply bind)                       ; free symbols without ns or definition
@@ -117,60 +117,60 @@
 
 (tests
 
-  (rewrite-await '(a ~b)) => '(fmap a b)
-  (rewrite-await '(a ~b ~c)) => '(fapply (pure a) b c)
-  (rewrite-await '[a ~b]) => '(fapply (pure a) b)
-  (rewrite-await '[a ~b ~c]) => '(fapply (pure a) b c)
+  (rewrite-await '(a ~b)) := '(fmap a b)
+  (rewrite-await '(a ~b ~c)) := '(fapply (pure a) b c)
+  (rewrite-await '[a ~b]) := '(fapply (pure a) b)
+  (rewrite-await '[a ~b ~c]) := '(fapply (pure a) b c)
 
   (macroexpand-1 '(do> (+ a 1)))
-  => '(+ a 1)
+  := '(+ a 1)
 
   (macroexpand-1 '(do> (inc ~a)))
-  => '(fmap inc a)
+  := '(fmap inc a)
 
   (macroexpand-1 '(do> (inc ~a ~b c)))
-  => '(fapply (pure inc) a b (pure c))
+  := '(fapply (pure inc) a b (pure c))
 
   (macroexpand-1 '(do> (just 1)))
-  => '(just 1)
+  := '(just 1)
 
   (macroexpand-1 '(do> (+ a ~(just 42))))
-  => '(fapply (pure +) (pure a) (just 42))
+  := '(fapply (pure +) (pure a) (just 42))
 
   (macroexpand-1 '(do> (for [a 1] ...)))
-  => '(mlet [a (pure 1)] ...)
+  := '(mlet [a (pure 1)] ...)
 
   (macroexpand-1 '(do> (for [a ~(just 1)] ...)))
-  => '(mlet [a (just 1)] ...)
+  := '(mlet [a (just 1)] ...)
 
   (macroexpand-1
     '(do> (for [a ~(just 1)
                 b ~(+ a ~(just 42))
                 c 1]
             ...)))
-  => '(mlet [a (just 1),
+  := '(mlet [a (just 1),
              b (fapply (pure +) (pure a) (just 42)),
              c (pure 1)]
         ...)
 
   (macroexpand-1 '(do> ~a))
-  => '(clojure.core/unquote a)
+  := '(clojure.core/unquote a)
 
   (macroexpand-1 '(do> (for [] ~a)))                        ; likely type error
-  => '(mlet [] (clojure.core/unquote a))                    ; leave it
+  := '(mlet [] (clojure.core/unquote a))                    ; leave it
 
   (macroexpand-1 '(do> (for [a ~(just 1)] ~a)))
-  => '(mlet [a (just 1)] (clojure.core/unquote a))
+  := '(mlet [a (just 1)] (clojure.core/unquote a))
 
   ;(macroexpand-1 '(do> (bind {} (clojure.core/unquote a))))
-  ;=> '(mlet [] (clojure.core/unquote a))
+  ;:= '(mlet [] (clojure.core/unquote a))
 
   (macroexpand-1
     '(do> (for [a ~(just 1)
                 b ~(+ a ~(just 42))
                 c 1]
             ...)))
-  => '(mlet [a (just 1) b (fapply (pure +) (pure a) (just 42)) c (pure 1)] ...)
+  := '(mlet [a (just 1) b (fapply (pure +) (pure a) (just 42)) c (pure 1)] ...)
 
   )
 
@@ -200,17 +200,17 @@
 
 (tests
   (rewrite-free '(mlet [a mv] ...))
-  => '(hyperfiddle.via/! :Do.bind mv (clojure.core/fn [a] ...))
+  := '(hyperfiddle.via/! :Do.bind mv (clojure.core/fn [a] ...))
 
   (rewrite-free '(mlet [f (just +)] ...))
-  => '(hyperfiddle.via/! :Do.bind (just +) (clojure.core/fn [f] ...))
+  := '(hyperfiddle.via/! :Do.bind (just +) (clojure.core/fn [f] ...))
 
   (rewrite-free '(mlet [a (just 1) b (fapply (pure +) (pure a) (just 42)) c (pure 1)] ...))
-  ;=> '(bind (just 1) (clojure.core/fn [a]
+  ;:= '(bind (just 1) (clojure.core/fn [a]
   ;                     (bind (fapply (pure +) (pure a) (just 42)) (clojure.core/fn [b]
   ;                                                                  (bind (pure 1) (clojure.core/fn [c]
   ;                                                                                   (do ...)))))))
-  => '(hyperfiddle.via/!
+  := '(hyperfiddle.via/!
         :Do.bind
         (just 1)
         (clojure.core/fn
@@ -270,7 +270,7 @@
 (tests
 
   ;(macroexpand-1 '(mlet [a ma b mb] ...))
-  ;=> (bind ma (fn [a] (bind mb (fn [b] ...))))
+  ;:= (bind ma (fn [a] (bind mb (fn [b] ...))))
 
   (try
     (macroexpand-1 '(via (reify)                           ; !
@@ -280,7 +280,7 @@
                         (pure (inc b)))))
     ::worked
     (catch Exception e e))
-  => ::worked
+  := ::worked
   )
 
 (tests
@@ -299,19 +299,19 @@
                           (just (apply f vs)))))
          :Do.fapply (fn [& avs] (apply ! :Do.fmap #(apply % %&) avs))
          :Do.bind   (fn [{v :Maybe/just} cont] (if v (cont v)))})))
-  => hyperfiddle.via.Maybe
+  := hyperfiddle.via.Maybe
 
   (via (->Maybe)
     (for [f (pure +)
           a (pure 1)
           b ~(~f 10 ~a)]
       (pure (inc b))))
-  => #:Maybe{:just 12}
+  := #:Maybe{:just 12}
 
   (via (->Maybe)
     (for [a ~(just 1)
           b ~(+ a ~(just 42))
           c (for [i (range (+ a 2))] i)]                    ; vanilla for
       (pure (+ a b (reduce + c)))))
-  => #:Maybe{:just 47}
+  := #:Maybe{:just 47}
   )
